@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fit Check</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: #FAF8F5;
+      color: #2D2A26;
+      min-height: 100vh;
+    }
+    .font-display { font-family: 'Cormorant Garamond', serif; }
+    .bg-cream { background: #FAF8F5; }
+    .bg-warm { background: #F5F0E8; }
+    .bg-sage { background: #E8EDE6; }
+    .text-warm-gray { color: #6B6560; }
+    .border-warm { border-color: #E5DFD6; }
+    .btn-primary {
+      background: #2D2A26;
+      color: #FAF8F5;
+      transition: all 0.2s ease;
+    }
+    .btn-primary:hover { background: #4A4640; }
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid #2D2A26;
+      color: #2D2A26;
+      transition: all 0.2s ease;
+    }
+    .btn-secondary:hover {
+      background: #2D2A26;
+      color: #FAF8F5;
+    }
+    .card {
+      background: white;
+      border: 1px solid #E5DFD6;
+      border-radius: 8px;
+    }
+    .input-field {
+      background: white;
+      border: 1px solid #E5DFD6;
+      border-radius: 6px;
+      padding: 10px 14px;
+      width: 100%;
+      transition: border-color 0.2s ease;
+    }
+    .input-field:focus {
+      outline: none;
+      border-color: #2D2A26;
+    }
+    .status-considering { background: #FEF3C7; color: #92400E; }
+    .status-passed { background: #FEE2E2; color: #991B1B; }
+    .status-purchased { background: #D1FAE5; color: #065F46; }
+    textarea { resize: vertical; }
+    .fade-in {
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const storage = {
+      get: (key, defaultValue) => {
+        try {
+          const item = localStorage.getItem(key);
+          return item ? JSON.parse(item) : defaultValue;
+        } catch { return defaultValue; }
+      },
+      set: (key, value) => localStorage.setItem(key, JSON.stringify(value))
+    };
+
+    const defaultProfile = {
+      bodyMeasurements: {
+        height: '', weight: '', cupSize: '', bust: '', waist: '',
+        hips: '', inseam: '', shoulderWidth: '', notes: ''
+      },
+      referenceItems: []
+    };
+
+    const categories = [
+      'Tops & Blouses', 'Sweaters & Knits', 'Dresses', 'Jackets & Coats',
+      'Pants & Jeans', 'Skirts', 'Suits & Blazers', 'Shoes', 'Other'
+    ];
+
+    function App() {
+      const [activeTab, setActiveTab] = useState('check');
+      const [profile, setProfile] = useState(() => storage.get('fitProfile', defaultProfile));
+      const [library, setLibrary] = useState(() => storage.get('fitLibrary', []));
+      const [apiKey, setApiKey] = useState(() => storage.get('claudeApiKey', ''));
+      const [showSettings, setShowSettings] = useState(false);
+
+      useEffect(() => { storage.set('fitProfile', profile); }, [profile]);
+      useEffect(() => { storage.set('fitLibrary', library); }, [library]);
+      useEffect(() => { storage.set('claudeApiKey', apiKey); }, [apiKey]);
+
+      const updateProfile = (updates) => setProfile(prev => ({ ...prev, ...updates }));
+      const addToLibrary = (item) => setLibrary(prev => [item, ...prev]);
+      const updateLibraryItem = (id, updates) => {
+        setLibrary(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
+      };
+      const deleteLibraryItem = (id) => setLibrary(prev => prev.filter(item => item.id !== id));
+
+      return (
+        <div className="min-h-screen bg-cream">
+          <header className="border-b border-warm bg-white sticky top-0 z-50">
+            <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
+              <h1 className="font-display text-3xl font-medium tracking-tight">Fit Check</h1>
+              <button onClick={() => setShowSettings(!showSettings)} className="text-warm-gray hover:text-2D2A26 transition-colors">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
+            </div>
+          </header>
+
+          {showSettings && (
+            <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={() => setShowSettings(false)}>
+              <div className="card p-6 max-w-md w-full fade-in" onClick={e => e.stopPropagation()}>
+                <h2 className="font-display text-2xl mb-4">Settings</h2>
+                <label className="block mb-2 text-sm font-medium">Claude API Key</label>
+                <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-ant-..." className="input-field mb-4" />
+                <p className="text-sm text-warm-gray mb-4">
+                  Get your API key from <a href="https://console.anthropic.com" target="_blank" className="underline">console.anthropic.com</a>
+                </p>
+                <button onClick={() => setShowSettings(false)} className="btn-primary px-4 py-2 rounded-lg w-full">Done</button>
+              </div>
+            </div>
+          )}
+
+          <nav className="border-b border-warm bg-white">
+            <div className="max-w-4xl mx-auto px-6 flex gap-1">
+              {[
+                { id: 'check', label: 'Check Listing' },
+                { id: 'library', label: 'Library' },
+                { id: 'profile', label: 'My Fit Profile' }
+              ].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                  className={`px-4 py-3 text-sm font-medium transition-colors relative ${
+                    activeTab === tab.id ? 'text-2D2A26' : 'text-warm-gray hover:text-2D2A26'
+                  }`}>
+                  {tab.label}
+                  {activeTab === tab.id && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-2D2A26" />}
+                </button>
+              ))}
+            </div>
+          </nav>
+
+          <main className="max-w-4xl mx-auto px-6 py-8">
+            {activeTab === 'check' && (
+              <CheckListing profile={profile} apiKey={apiKey} onSave={addToLibrary} onNeedApiKey={() => setShowSettings(true)} />
+            )}
+            {activeTab === 'library' && (
+              <Library items={library} onUpdate={updateLibraryItem} onDelete={deleteLibraryItem} />
+            )}
+            {activeTab === 'profile' && (
+              <FitProfile profile={profile} onUpdate={updateProfile} />
+            )}
+          </main>
+        </div>
+      );
+    }
+
+    function CheckListing({ profile, apiKey, onSave, onNeedApiKey }) {
+      const [listingText, setListingText] = useState('');
+      const [listingUrl, setListingUrl] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [result, setResult] = useState(null);
+      const [error, setError] = useState(null);
+
+      const hasProfile = profile.bodyMeasurements.height || profile.referenceItems.length > 0;
+
+      const checkFit = async () => {
+        if (!apiKey) { onNeedApiKey(); return; }
+        if (!listingText.trim()) { setError('Please paste the listing details'); return; }
+        if (!hasProfile) { setError('Please add some measurements or reference items to your profile first'); return; }
+
+        setLoading(true);
+        setError(null);
+        setResult(null);
+
+        const profileSummary = buildProfileSummary(profile);
+        const prompt = `You are a personal shopping assistant helping someone determine if a vintage clothing item will fit them well.
+
+Here is the shopper's fit profile:
+${profileSummary}
+
+Here is the listing they're considering:
+${listingText}
+
+${listingUrl ? `Listing URL: ${listingUrl}` : ''}
+
+Please analyze this listing and provide:
+1. **Fit Assessment**: Will this likely fit well? Consider their reference items and body measurements.
+2. **Key Considerations**: What specific measurements or details should they pay attention to?
+3. **Confidence Level**: How confident are you in this assessment? (High/Medium/Low) What information would increase confidence?
+4. **Recommendation**: Buy, Pass, or Need More Info?
+
+Be specific and reference their actual measurements and reference items when making comparisons. If measurements are missing from the listing, note what they should ask the seller for.`;
+
+        try {
+          const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'anthropic-dangerous-direct-browser-access': 'true'
+            },
+            body: JSON.stringify({
+              model: 'claude-sonnet-4-20250514',
+              max_tokens: 1024,
+              messages: [{ role: 'user', content: prompt }]
+            })
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error?.message || `API error: ${response.status}`);
+          }
+
+          const data = await response.json();
+          setResult({
+            analysis: data.content[0].text,
+            listingText,
+            listingUrl,
+            timestamp: new Date().toISOString()
+          });
+        } catch (err) {
+          setError(err.message || 'Failed to analyze listing');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const saveToLibrary = (status) => {
+        onSave({
+          id: Date.now().toString(),
+          listingText: result.listingText,
+          listingUrl: result.listingUrl,
+          analysis: result.analysis,
+          status,
+          createdAt: result.timestamp,
+          notes: ''
+        });
+        setResult(null);
+        setListingText('');
+        setListingUrl('');
+      };
+
+      return (
+        <div className="space-y-6 fade-in">
+          <div>
+            <h2 className="font-display text-2xl mb-2">Check a Listing</h2>
+            <p className="text-warm-gray">Paste listing details to see how it might fit you.</p>
+          </div>
+
+          {!hasProfile && (
+            <div className="card p-4 bg-warm border-none">
+              <p className="text-sm"><strong>Tip:</strong> Add your measurements and some reference items to your profile first for better fit analysis.</p>
+            </div>
+          )}
+
+          <div className="card p-6 space-y-4">
+            <div>
+              <label className="block mb-2 text-sm font-medium">Listing URL (optional)</label>
+              <input type="url" value={listingUrl} onChange={(e) => setListingUrl(e.target.value)}
+                placeholder="https://www.ebay.com/itm/..." className="input-field" />
+            </div>
+            <div>
+              <label className="block mb-2 text-sm font-medium">Listing Details *</label>
+              <textarea value={listingText} onChange={(e) => setListingText(e.target.value)}
+                placeholder="Paste the listing title, description, measurements, size, condition, etc."
+                rows={8} className="input-field" />
+            </div>
+            {error && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
+            <button onClick={checkFit} disabled={loading}
+              className="btn-primary px-6 py-3 rounded-lg font-medium w-full disabled:opacity-50">
+              {loading ? 'Analyzing...' : 'Check Fit'}
+            </button>
+          </div>
+
+          {result && (
+            <div className="card p-6 space-y-4 fade-in">
+              <h3 className="font-display text-xl">Fit Analysis</h3>
+              <div className="prose prose-sm max-w-none text-warm-gray whitespace-pre-wrap">{result.analysis}</div>
+              <div className="pt-4 border-t border-warm">
+                <p className="text-sm font-medium mb-3">Save to library as:</p>
+                <div className="flex gap-2 flex-wrap">
+                  <button onClick={() => saveToLibrary('considering')} className="px-4 py-2 rounded-lg text-sm font-medium status-considering">Considering</button>
+                  <button onClick={() => saveToLibrary('passed')} className="px-4 py-2 rounded-lg text-sm font-medium status-passed">Pass</button>
+                  <button onClick={() => saveToLibrary('purchased')} className="px-4 py-2 rounded-lg text-sm font-medium status-purchased">Purchased</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function Library({ items, onUpdate, onDelete }) {
+      const [filter, setFilter] = useState('all');
+      const [expandedId, setExpandedId] = useState(null);
+
+      const filteredItems = filter === 'all' ? items : items.filter(item => item.status === filter);
+      const statusCounts = {
+        all: items.length,
+        considering: items.filter(i => i.status === 'considering').length,
+        passed: items.filter(i => i.status === 'passed').length,
+        purchased: items.filter(i => i.status === 'purchased').length
+      };
+
+      return (
+        <div className="space-y-6 fade-in">
+          <div>
+            <h2 className="font-display text-2xl mb-2">Your Library</h2>
+            <p className="text-warm-gray">Track listings you've checked.</p>
+          </div>
+
+          <div className="flex gap-2 flex-wrap">
+            {['all', 'considering', 'passed', 'purchased'].map(f => (
+              <button key={f} onClick={() => setFilter(f)}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  filter === f ? 'bg-2D2A26 text-white' : 'bg-warm text-warm-gray hover:bg-sage'
+                }`}>
+                {f.charAt(0).toUpperCase() + f.slice(1)} ({statusCounts[f]})
+              </button>
+            ))}
+          </div>
+
+          {filteredItems.length === 0 ? (
+            <div className="card p-8 text-center text-warm-gray">
+              {items.length === 0 ? "No listings yet. Check a listing to add it to your library." : "No listings match this filter."}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredItems.map(item => (
+                <LibraryItem key={item.id} item={item} expanded={expandedId === item.id}
+                  onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                  onUpdate={(updates) => onUpdate(item.id, updates)}
+                  onDelete={() => onDelete(item.id)} />
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function LibraryItem({ item, expanded, onToggle, onUpdate, onDelete }) {
+      const [notes, setNotes] = useState(item.notes || '');
+      const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+      const statusStyles = { considering: 'status-considering', passed: 'status-passed', purchased: 'status-purchased' };
+      const getListingPreview = () => {
+        const firstLine = (item.listingText || '').split('\n')[0];
+        return firstLine.length > 80 ? firstLine.slice(0, 80) + '...' : firstLine;
+      };
+
+      return (
+        <div className="card overflow-hidden">
+          <div className="p-4 cursor-pointer hover:bg-warm/50 transition-colors" onClick={onToggle}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium truncate">{getListingPreview()}</p>
+                <p className="text-sm text-warm-gray mt-1">{new Date(item.createdAt).toLocaleDateString()}</p>
+              </div>
+              <span className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap ${statusStyles[item.status]}`}>
+                {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+              </span>
+            </div>
+          </div>
+
+          {expanded && (
+            <div className="border-t border-warm p-4 space-y-4 fade-in">
+              {item.listingUrl && (
+                <a href={item.listingUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline block">
+                  View Original Listing →
+                </a>
+              )}
+              <div>
+                <h4 className="text-sm font-medium mb-2">Listing Details</h4>
+                <p className="text-sm text-warm-gray whitespace-pre-wrap bg-warm p-3 rounded-lg max-h-40 overflow-y-auto">{item.listingText}</p>
+              </div>
+              <div>
+                <h4 className="text-sm font-medium mb-2">Fit Analysis</h4>
+                <p className="text-sm text-warm-gray whitespace-pre-wrap">{item.analysis}</p>
+              </div>
+              <div>
+                <h4 className="text-sm font-medium mb-2">Your Notes</h4>
+                <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
+                  onBlur={() => notes !== item.notes && onUpdate({ notes })}
+                  placeholder="Add personal notes..." rows={2} className="input-field text-sm" />
+              </div>
+              <div className="flex items-center justify-between pt-2">
+                <div className="flex gap-2">
+                  <label className="text-sm text-warm-gray">Status:</label>
+                  <select value={item.status} onChange={(e) => onUpdate({ status: e.target.value })}
+                    className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer">
+                    <option value="considering">Considering</option>
+                    <option value="passed">Passed</option>
+                    <option value="purchased">Purchased</option>
+                  </select>
+                </div>
+                {showDeleteConfirm ? (
+                  <div className="flex gap-2 items-center">
+                    <span className="text-sm text-warm-gray">Delete?</span>
+                    <button onClick={onDelete} className="text-sm text-red-600 font-medium">Yes</button>
+                    <button onClick={() => setShowDeleteConfirm(false)} className="text-sm text-warm-gray">No</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setShowDeleteConfirm(true)} className="text-sm text-warm-gray hover:text-red-600 transition-colors">Delete</button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function FitProfile({ profile, onUpdate }) {
+      const [activeSection, setActiveSection] = useState('body');
+      const [editingItem, setEditingItem] = useState(null);
+
+      const updateBodyMeasurement = (field, value) => {
+        onUpdate({ bodyMeasurements: { ...profile.bodyMeasurements, [field]: value } });
+      };
+
+      const addReferenceItem = (item) => {
+        onUpdate({ referenceItems: [...profile.referenceItems, { ...item, id: Date.now().toString() }] });
+        setEditingItem(null);
+      };
+
+      const updateReferenceItem = (id, updates) => {
+        onUpdate({ referenceItems: profile.referenceItems.map(item => item.id === id ? { ...item, ...updates } : item) });
+        setEditingItem(null);
+      };
+
+      const deleteReferenceItem = (id) => {
+        onUpdate({ referenceItems: profile.referenceItems.filter(item => item.id !== id) });
+      };
+
+      return (
+        <div className="space-y-6 fade-in">
+          <div>
+            <h2 className="font-display text-2xl mb-2">My Fit Profile</h2>
+            <p className="text-warm-gray">Your measurements and reference items help us analyze fit.</p>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={() => setActiveSection('body')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeSection === 'body' ? 'bg-2D2A26 text-white' : 'bg-warm text-warm-gray hover:bg-sage'
+              }`}>Body Measurements</button>
+            <button onClick={() => setActiveSection('items')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeSection === 'items' ? 'bg-2D2A26 text-white' : 'bg-warm text-warm-gray hover:bg-sage'
+              }`}>Reference Items ({profile.referenceItems.length})</button>
+          </div>
+
+          {activeSection === 'body' && (
+            <div className="card p-6 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                {[
+                  { key: 'height', label: 'Height', placeholder: '5\'6"' },
+                  { key: 'weight', label: 'Weight', placeholder: '130 lbs' },
+                  { key: 'cupSize', label: 'Cup Size', placeholder: '34C' },
+                  { key: 'bust', label: 'Bust', placeholder: '36"' },
+                  { key: 'waist', label: 'Waist', placeholder: '28"' },
+                  { key: 'hips', label: 'Hips', placeholder: '38"' },
+                  { key: 'inseam', label: 'Inseam', placeholder: '30"' },
+                  { key: 'shoulderWidth', label: 'Shoulder Width', placeholder: '15"' }
+                ].map(field => (
+                  <div key={field.key}>
+                    <label className="block mb-2 text-sm font-medium">{field.label}</label>
+                    <input type="text" value={profile.bodyMeasurements[field.key]}
+                      onChange={(e) => updateBodyMeasurement(field.key, e.target.value)}
+                      placeholder={field.placeholder} className="input-field" />
+                  </div>
+                ))}
+              </div>
+              <div>
+                <label className="block mb-2 text-sm font-medium">General Fit Notes</label>
+                <textarea value={profile.bodyMeasurements.notes}
+                  onChange={(e) => updateBodyMeasurement('notes', e.target.value)}
+                  placeholder="E.g., Long torso, short arms, prefer looser fits..." rows={3} className="input-field" />
+              </div>
+            </div>
+          )}
+
+          {activeSection === 'items' && (
+            <div className="space-y-4">
+              <button onClick={() => setEditingItem({ isNew: true })} className="btn-secondary px-4 py-2 rounded-lg text-sm font-medium">
+                + Add Reference Item
+              </button>
+
+              {editingItem && (
+                <ReferenceItemForm item={editingItem.isNew ? null : editingItem}
+                  onSave={editingItem.isNew ? addReferenceItem : (updates) => updateReferenceItem(editingItem.id, updates)}
+                  onCancel={() => setEditingItem(null)} />
+              )}
+
+              {profile.referenceItems.length === 0 && !editingItem ? (
+                <div className="card p-8 text-center text-warm-gray">Add items from your closet that fit well to build your fit profile.</div>
+              ) : (
+                <div className="space-y-3">
+                  {profile.referenceItems.map(item => (
+                    <ReferenceItemCard key={item.id} item={item}
+                      onEdit={() => setEditingItem(item)} onDelete={() => deleteReferenceItem(item.id)} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function ReferenceItemForm({ item, onSave, onCancel }) {
+      const [formData, setFormData] = useState({
+        category: item?.category || '', brand: item?.brand || '', size: item?.size || '',
+        fitNotes: item?.fitNotes || '', measurements: item?.measurements || ''
+      });
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!formData.category || !formData.brand || !formData.size) return;
+        onSave(formData);
+      };
+
+      return (
+        <form onSubmit={handleSubmit} className="card p-6 space-y-4 fade-in">
+          <h3 className="font-display text-lg">{item ? 'Edit Item' : 'Add Reference Item'}</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block mb-2 text-sm font-medium">Category *</label>
+              <select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                className="input-field" required>
+                <option value="">Select...</option>
+                {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block mb-2 text-sm font-medium">Brand *</label>
+              <input type="text" value={formData.brand}
+                onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
+                placeholder="e.g., Everlane" className="input-field" required />
+            </div>
+          </div>
+          <div>
+            <label className="block mb-2 text-sm font-medium">Size *</label>
+            <input type="text" value={formData.size}
+              onChange={(e) => setFormData({ ...formData, size: e.target.value })}
+              placeholder="e.g., Small, 4, 27" className="input-field" required />
+          </div>
+          <div>
+            <label className="block mb-2 text-sm font-medium">Fit Notes</label>
+            <textarea value={formData.fitNotes}
+              onChange={(e) => setFormData({ ...formData, fitNotes: e.target.value })}
+              placeholder="e.g., Fits perfectly, slightly loose in shoulders, runs small..." rows={2} className="input-field" />
+          </div>
+          <div>
+            <label className="block mb-2 text-sm font-medium">Measurements (optional)</label>
+            <textarea value={formData.measurements}
+              onChange={(e) => setFormData({ ...formData, measurements: e.target.value })}
+              placeholder='e.g., Pit to pit: 19", Length: 26", Sleeve: 24"' rows={2} className="input-field" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="submit" className="btn-primary px-4 py-2 rounded-lg text-sm font-medium">{item ? 'Save Changes' : 'Add Item'}</button>
+            <button type="button" onClick={onCancel} className="btn-secondary px-4 py-2 rounded-lg text-sm font-medium">Cancel</button>
+          </div>
+        </form>
+      );
+    }
+
+    function ReferenceItemCard({ item, onEdit, onDelete }) {
+      const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+      return (
+        <div className="card p-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs px-2 py-0.5 bg-sage rounded">{item.category}</span>
+              </div>
+              <p className="font-medium">{item.brand} - {item.size}</p>
+              {item.fitNotes && <p className="text-sm text-warm-gray mt-1">{item.fitNotes}</p>}
+              {item.measurements && <p className="text-sm text-warm-gray mt-1 font-mono">{item.measurements}</p>}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={onEdit} className="text-sm text-warm-gray hover:text-2D2A26">Edit</button>
+              {showDeleteConfirm ? (
+                <div className="flex gap-1">
+                  <button onClick={onDelete} className="text-sm text-red-600">Yes</button>
+                  <button onClick={() => setShowDeleteConfirm(false)} className="text-sm text-warm-gray">No</button>
+                </div>
+              ) : (
+                <button onClick={() => setShowDeleteConfirm(true)} className="text-sm text-warm-gray hover:text-red-600">Delete</button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function buildProfileSummary(profile) {
+      let summary = '';
+      const body = profile.bodyMeasurements;
+      const bodyParts = [];
+      
+      if (body.height) bodyParts.push(`Height: ${body.height}`);
+      if (body.weight) bodyParts.push(`Weight: ${body.weight}`);
+      if (body.cupSize) bodyParts.push(`Cup size: ${body.cupSize}`);
+      if (body.bust) bodyParts.push(`Bust: ${body.bust}`);
+      if (body.waist) bodyParts.push(`Waist: ${body.waist}`);
+      if (body.hips) bodyParts.push(`Hips: ${body.hips}`);
+      if (body.inseam) bodyParts.push(`Inseam: ${body.inseam}`);
+      if (body.shoulderWidth) bodyParts.push(`Shoulder width: ${body.shoulderWidth}`);
+      
+      if (bodyParts.length > 0) {
+        summary += `BODY MEASUREMENTS:\n${bodyParts.join('\n')}`;
+        if (body.notes) summary += `\nGeneral notes: ${body.notes}`;
+        summary += '\n\n';
+      }
+
+      if (profile.referenceItems.length > 0) {
+        summary += 'REFERENCE ITEMS (clothes that fit well):\n';
+        profile.referenceItems.forEach((item, i) => {
+          summary += `\n${i + 1}. ${item.category}: ${item.brand} - Size ${item.size}`;
+          if (item.fitNotes) summary += `\n   Fit notes: ${item.fitNotes}`;
+          if (item.measurements) summary += `\n   Measurements: ${item.measurements}`;
+        });
+      }
+
+      return summary || 'No profile information provided yet.';
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
