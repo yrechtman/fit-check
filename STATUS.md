@@ -5,7 +5,7 @@
 - Hosted on Vercel with ScraperBee backend
 
 ## Issues
-- confirmation email flow
+- confirmation email flow [Need more info from users before we think about this]
 
 ## Roadmap
 - Need to confirm that it supports more than just eBay? The next thing to roll out is the reel-reel. Right now you can do it manually but the fetcher/scraper may not work for that 
