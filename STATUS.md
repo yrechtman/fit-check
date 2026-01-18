@@ -10,7 +10,5 @@ A personal shopping assistant for vintage clothing that helps users evaluate whe
 - Need to deal with the API key that creates a clunky onboarding experience for users but we can think about it later 
 
 ## Roadmap
-- Need to confirm that it supports more than just eBay? The next thing to roll out is the reel-reel. Right now you can do it manually but the fetcher/scraper may not work for that 
-- After I add an item to my wardrobe, the page is static. It doesn't give an indication that you've successfully added the item. Instead it should react and let you add a new item rather than needing to reload the page. Right now it's very easy to add the same item twice by accident by pressing "Save" again because you didn't realize anything actually happened.
-- I need to be able to copy and paste an image in right now. It only works via download and upload
-- Should add a fit rating for instance "good," "fair," "poor" in red, yellow, green that then displays when you view your whole watch list/library 
+- real real support
+- more robust item names beyond brand. the original prompt should just stay as a field so that we can maintain more context
