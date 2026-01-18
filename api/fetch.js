@@ -68,99 +68,140 @@ function parseEbayListing(html) {
       const jsonLd = JSON.parse(match[1]);
       if (jsonLd['@type'] === 'Product' || jsonLd.name) {
         if (jsonLd.name) title = jsonLd.name;
-        if (jsonLd.offers?.price) price = jsonLd.offers.price;
-        if (jsonLd.offers?.priceCurrency) price = jsonLd.offers.price;
+        if (jsonLd.offers?.price) price = String(jsonLd.offers.price);
         if (jsonLd.brand?.name) specifics['Brand'] = jsonLd.brand.name;
         if (jsonLd.description) description = jsonLd.description;
       }
     } catch {}
   }
 
-  // Fallback: Extract title from meta or h1
+  // Extract title from og:title meta tag (very reliable)
   if (!title) {
-    const metaTitleMatch = html.match(/<meta[^>]*property="og:title"[^>]*content="([^"]+)"/i);
-    if (metaTitleMatch) title = metaTitleMatch[1];
+    const ogTitleMatch = html.match(/<meta[^>]*property="og:title"[^>]*content="([^"]+)"/i)
+      || html.match(/<meta[^>]*content="([^"]+)"[^>]*property="og:title"/i);
+    if (ogTitleMatch) {
+      title = ogTitleMatch[1].replace(/ \| eBay$/, '').trim();
+    }
   }
+  
+  // Fallback: page title
   if (!title) {
-    const h1Match = html.match(/<h1[^>]*class="[^"]*x-item-title[^"]*"[^>]*>([\s\S]*?)<\/h1>/i);
-    if (h1Match) {
-      title = h1Match[1].replace(/<[^>]+>/g, '').trim();
+    const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+    if (titleMatch) {
+      title = titleMatch[1].replace(/ \| eBay$/, '').trim();
     }
   }
 
-  // Extract price - look for the actual price display, not item numbers
+  // Extract price - be very careful not to grab item numbers
+  // Look for US dollar amounts that are reasonable prices (under $10000)
   if (!price) {
-    // Look for price in the specific eBay price container
-    const priceContainerMatch = html.match(/class="[^"]*x-price-primary[^"]*"[^>]*>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/i);
-    if (priceContainerMatch) {
-      const priceText = priceContainerMatch[1].replace(/<[^>]+>/g, '');
-      const priceNum = priceText.match(/\$?([\d,]+\.?\d*)/);
-      if (priceNum) price = priceNum[1];
+    // Look for the price in common eBay patterns
+    const pricePatterns = [
+      /itemprop="price"[^>]*content="([\d.]+)"/i,
+      /"priceCurrency"\s*:\s*"USD"[\s\S]*?"price"\s*:\s*"?([\d.]+)/i,
+      /"price"\s*:\s*"?([\d.]+)"?[\s\S]*?"priceCurrency"\s*:\s*"USD"/i,
+      /class="[^"]*x-price-primary[^"]*"[^>]*>[\s\S]*?US\s*\$([\d,]+\.?\d*)/i,
+      /US\s*\$([\d,]+\.\d{2})\s*<\/span>/i,
+      /<span[^>]*>\s*US\s*\$([\d,]+\.\d{2})\s*<\/span>/i,
+    ];
+    
+    for (const pattern of pricePatterns) {
+      const match = html.match(pattern);
+      if (match) {
+        const priceVal = parseFloat(match[1].replace(/,/g, ''));
+        // Sanity check: price should be between $0.01 and $50000
+        if (priceVal > 0 && priceVal < 50000) {
+          price = match[1].replace(/,/g, '');
+          break;
+        }
+      }
     }
-  }
-  if (!price) {
-    // Try itemprop price
-    const itempropMatch = html.match(/itemprop="price"[^>]*content="([\d.]+)"/i);
-    if (itempropMatch) price = itempropMatch[1];
   }
 
   // Extract condition
-  const conditionMatch = html.match(/data-testid="ux-labels-values[^"]*condition[^"]*"[^>]*>[\s\S]*?<span[^>]*class="[^"]*ux-textspans--BOLD[^"]*"[^>]*>([^<]+)/i)
-    || html.match(/"conditionDisplayName"\s*:\s*"([^"]+)"/i)
-    || html.match(/Condition:[\s\S]*?<span[^>]*>([^<]+)<\/span>/i);
-  if (conditionMatch) condition = conditionMatch[1].trim();
+  if (!condition) {
+    const conditionPatterns = [
+      /"conditionDisplayName"\s*:\s*"([^"]+)"/i,
+      /Condition:<\/span>[\s\S]*?<span[^>]*>([^<]+)<\/span>/i,
+      /itemCondition"[^>]*>([^<]+)</i,
+      /<span[^>]*class="[^"]*ux-icon-text[^"]*"[^>]*>([^<]*(?:New|Pre-owned|Used)[^<]*)<\/span>/i,
+    ];
+    
+    for (const pattern of conditionPatterns) {
+      const match = html.match(pattern);
+      if (match && match[1].trim()) {
+        condition = match[1].trim();
+        break;
+      }
+    }
+  }
 
-  // Extract item specifics from the specifics section
-  // eBay uses a structure like: <div class="ux-labels-values__labels"><span>Size</span></div><div class="ux-labels-values__values"><span>XLT</span></div>
-  const specificsSection = html.match(/About this item[\s\S]*?(?=<div[^>]*class="[^"]*vim)/i);
-  if (specificsSection) {
-    const labelValuePairs = specificsSection[0].matchAll(/ux-labels-values__labels[^>]*>[\s\S]*?<span[^>]*>([^<]+)<\/span>[\s\S]*?ux-labels-values__values[^>]*>[\s\S]*?<span[^>]*>([^<]+)<\/span>/gi);
-    for (const pair of labelValuePairs) {
-      const key = pair[1].trim();
-      const value = pair[2].trim();
-      if (key && value && !key.includes('...')) {
+  // Extract item specifics
+  // Pattern 1: Look for labeled value pairs
+  const specPatterns = [
+    /<span[^>]*class="[^"]*ux-textspans[^"]*"[^>]*>([^<]{1,30})<\/span>[\s\S]{0,200}?<span[^>]*class="[^"]*ux-textspans--BOLD[^"]*"[^>]*>([^<]+)<\/span>/gi,
+    /<dt[^>]*>([^<]+)<\/dt>\s*<dd[^>]*>([^<]+)<\/dd>/gi,
+  ];
+  
+  for (const pattern of specPatterns) {
+    const matches = html.matchAll(pattern);
+    for (const match of matches) {
+      const key = match[1].replace(/:$/, '').trim();
+      const value = match[2].trim();
+      // Filter out non-specifics
+      if (key && value && 
+          key.length < 25 && 
+          value.length < 100 &&
+          !key.match(/^(See|View|Read|Show|More|Less|\d)/i) &&
+          !value.match(/^(See|View|Read|Show)/i)) {
         specifics[key] = value;
       }
     }
   }
 
-  // Alternative: try to find specifics in a different format
-  const specRows = html.matchAll(/<div[^>]*class="[^"]*ux-layout-section-evo__col[^"]*"[^>]*>[\s\S]*?<span[^>]*>([^<]+)<\/span>[\s\S]*?<span[^>]*class="[^"]*ux-textspans--BOLD[^"]*"[^>]*>([^<]+)<\/span>/gi);
-  for (const row of specRows) {
-    const key = row[1].trim();
-    const value = row[2].trim();
-    if (key && value && key.length < 30 && !specifics[key]) {
-      specifics[key] = value;
+  // Look for common specifics by name
+  const commonSpecs = ['Size', 'Brand', 'Color', 'Material', 'Style', 'Type', 'Pattern', 'Sleeve Length', 'Fit', 'Department'];
+  for (const spec of commonSpecs) {
+    if (!specifics[spec]) {
+      const specMatch = html.match(new RegExp(`>${spec}:?<[^>]*>[\\s\\S]*?<span[^>]*class="[^"]*BOLD[^"]*"[^>]*>([^<]+)`, 'i'))
+        || html.match(new RegExp(`"${spec}"\\s*:\\s*"([^"]+)"`, 'i'));
+      if (specMatch) {
+        specifics[spec] = specMatch[1].trim();
+      }
     }
   }
 
-  // Extract seller description - this is often in an iframe or loaded dynamically
-  // Look for the description section
-  if (!description) {
-    const descMatch = html.match(/Item description from the seller[\s\S]*?<div[^>]*>([\s\S]*?)<\/div>[\s\S]*?(?:About this item|Report this item)/i);
-    if (descMatch) {
-      description = descMatch[1]
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/\s+/g, ' ')
-        .trim();
-    }
-  }
-
-  // Try another pattern for description
+  // Extract seller description
+  // eBay often loads this via iframe, but ScrapingBee should render it
   if (!description || description.length < 20) {
-    const descMatch2 = html.match(/<div[^>]*id="desc_div"[^>]*>([\s\S]*?)<\/div>/i)
-      || html.match(/<div[^>]*class="[^"]*d-item-description[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-    if (descMatch2) {
-      description = descMatch2[1]
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/\s+/g, ' ')
-        .trim();
+    const descPatterns = [
+      /Item description from the seller[\s\S]*?<div[^>]*class="[^"]*"[^>]*>([\s\S]{20,}?)<\/div>[\s\S]*?(?:Shipping|About this item|Report)/i,
+      /<div[^>]*id="viTabs_0_is"[^>]*>([\s\S]*?)<\/div>/i,
+      /<div[^>]*class="[^"]*item-description[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+      /<div[^>]*data-testid="d-item-description"[^>]*>([\s\S]*?)<\/div>/i,
+      /descriptionModule[\s\S]*?<div[^>]*>([\s\S]{50,}?)<\/div>/i,
+    ];
+    
+    for (const pattern of descPatterns) {
+      const match = html.match(pattern);
+      if (match && match[1]) {
+        const cleaned = match[1]
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/\s+/g, ' ')
+          .trim();
+        
+        if (cleaned.length > 20 && cleaned.length > (description?.length || 0)) {
+          description = cleaned;
+        }
+      }
     }
   }
 
@@ -177,12 +218,14 @@ function parseEbayListing(html) {
     }
   }
   
-  if (description && description.length > 10) {
+  if (description && description.length > 20) {
     summary += `\nSeller Description:\n${description.slice(0, 3000)}`;
     if (description.length > 3000) summary += '...';
+  } else {
+    summary += '\n(Seller description not found - it may be in an iframe. You can paste it manually below.)';
   }
 
-  if (!summary || summary.length < 50) {
+  if (!title && !price) {
     summary = 'Could not parse listing details. Please paste the listing content manually.';
   }
 
@@ -191,7 +234,7 @@ function parseEbayListing(html) {
     price,
     condition,
     specifics,
-    description: description.slice(0, 3000),
+    description: (description || '').slice(0, 3000),
     summary
   };
 }
