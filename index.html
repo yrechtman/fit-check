@@ -564,6 +564,7 @@ Examples:
   const handleSave = () => {
     if (!parsedData.category || !parsedData.brand || !parsedData.size) { setError('Category, brand, and size are required'); return; }
     onSave(parsedData);
+    onCancel();
   };
 
   if (parsedData) {
