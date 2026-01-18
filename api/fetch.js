@@ -26,17 +26,21 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid URL' });
   }
 
+  // ScrapingBee API key from environment variable
+  const apiKey = process.env.SCRAPINGBEE_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'ScrapingBee API key not configured' });
+  }
+
   try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-      }
-    });
+    // Use ScrapingBee with JS rendering enabled
+    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${apiKey}&url=${encodeURIComponent(url)}&render_js=true&wait=3000`;
+    
+    const response = await fetch(scrapingBeeUrl);
 
     if (!response.ok) {
-      return res.status(response.status).json({ error: `Failed to fetch: ${response.statusText}` });
+      const errorText = await response.text();
+      return res.status(response.status).json({ error: `ScrapingBee error: ${errorText}` });
     }
 
     const html = await response.text();
