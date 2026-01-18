@@ -1,4 +1,5 @@
-# Fit Check Status
+# Fit Check 
+A personal shopping assistant for vintage clothing that helps users evaluate whether items will fit based on their body measurements and existing wardrobe.
 
 ## Current State
 - Working: auth, scraper, library, profile, reference items
