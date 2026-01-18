@@ -26,14 +26,13 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid URL' });
   }
 
-  // ScrapingBee API key from environment variable
   const apiKey = process.env.SCRAPINGBEE_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: 'ScrapingBee API key not configured' });
   }
 
   try {
-    // Use ScrapingBee with JS rendering enabled
+    // First pass: get main page
     const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${apiKey}&url=${encodeURIComponent(url)}&render_js=true&wait=3000`;
     
     const response = await fetch(scrapingBeeUrl);
@@ -45,13 +44,86 @@ export default async function handler(req, res) {
 
     const html = await response.text();
     
-    // Extract relevant listing info from eBay HTML
-    const listing = parseEbayListing(html);
+    // Parse main listing info
+    let listing = parseEbayListing(html);
+    
+    // Second pass: try to get iframe description if we didn't find one
+    if (!listing.description || listing.description.length < 50) {
+      const iframeUrl = extractDescriptionIframeUrl(html);
+      if (iframeUrl) {
+        try {
+          const iframeResponse = await fetch(
+            `https://app.scrapingbee.com/api/v1/?api_key=${apiKey}&url=${encodeURIComponent(iframeUrl)}&render_js=false`
+          );
+          if (iframeResponse.ok) {
+            const iframeHtml = await iframeResponse.text();
+            const iframeDescription = parseIframeDescription(iframeHtml);
+            if (iframeDescription && iframeDescription.length > (listing.description?.length || 0)) {
+              listing.description = iframeDescription;
+              // Rebuild summary with new description
+              listing.summary = buildSummary(listing);
+            }
+          }
+        } catch (e) {
+          // Iframe fetch failed, continue with what we have
+          console.error('Iframe fetch failed:', e.message);
+        }
+      }
+    }
     
     return res.status(200).json(listing);
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
+}
+
+function extractDescriptionIframeUrl(html) {
+  // eBay description iframes typically have URLs like:
+  // https://vi.vipr.ebaydesc.com/ws/eBayISAPI.dll?ViewItemDescV4&item=...
+  // or embedded in data attributes
+  
+  const patterns = [
+    /iframe[^>]*src="(https?:\/\/vi\.vipr\.ebaydesc\.com[^"]+)"/i,
+    /iframe[^>]*src="(https?:\/\/[^"]*ebaydesc[^"]+)"/i,
+    /"descriptionUrl"\s*:\s*"([^"]+)"/i,
+    /data-src="(https?:\/\/vi\.vipr\.ebaydesc\.com[^"]+)"/i,
+    /"iframeUrl"\s*:\s*"([^"]+ebaydesc[^"]+)"/i,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match) {
+      // Unescape any escaped characters
+      return match[1].replace(/\\u002F/g, '/').replace(/\\/g, '');
+    }
+  }
+  
+  return null;
+}
+
+function parseIframeDescription(html) {
+  // The iframe content is usually simpler HTML with the actual description
+  // Strip all HTML and get the text
+  let text = html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, '\n')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\n\s*\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+  
+  // Clean up excessive whitespace while preserving line breaks for readability
+  const lines = text.split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+  
+  return lines.join('\n');
 }
 
 function parseEbayListing(html) {
@@ -75,7 +147,7 @@ function parseEbayListing(html) {
     } catch {}
   }
 
-  // Extract title from og:title meta tag (very reliable)
+  // Extract title from og:title meta tag
   if (!title) {
     const ogTitleMatch = html.match(/<meta[^>]*property="og:title"[^>]*content="([^"]+)"/i)
       || html.match(/<meta[^>]*content="([^"]+)"[^>]*property="og:title"/i);
@@ -92,24 +164,20 @@ function parseEbayListing(html) {
     }
   }
 
-  // Extract price - be very careful not to grab item numbers
-  // Look for US dollar amounts that are reasonable prices (under $10000)
+  // Extract price
   if (!price) {
-    // Look for the price in common eBay patterns
     const pricePatterns = [
       /itemprop="price"[^>]*content="([\d.]+)"/i,
       /"priceCurrency"\s*:\s*"USD"[\s\S]*?"price"\s*:\s*"?([\d.]+)/i,
       /"price"\s*:\s*"?([\d.]+)"?[\s\S]*?"priceCurrency"\s*:\s*"USD"/i,
       /class="[^"]*x-price-primary[^"]*"[^>]*>[\s\S]*?US\s*\$([\d,]+\.?\d*)/i,
       /US\s*\$([\d,]+\.\d{2})\s*<\/span>/i,
-      /<span[^>]*>\s*US\s*\$([\d,]+\.\d{2})\s*<\/span>/i,
     ];
     
     for (const pattern of pricePatterns) {
       const match = html.match(pattern);
       if (match) {
         const priceVal = parseFloat(match[1].replace(/,/g, ''));
-        // Sanity check: price should be between $0.01 and $50000
         if (priceVal > 0 && priceVal < 50000) {
           price = match[1].replace(/,/g, '');
           break;
@@ -137,7 +205,6 @@ function parseEbayListing(html) {
   }
 
   // Extract item specifics
-  // Pattern 1: Look for labeled value pairs
   const specPatterns = [
     /<span[^>]*class="[^"]*ux-textspans[^"]*"[^>]*>([^<]{1,30})<\/span>[\s\S]{0,200}?<span[^>]*class="[^"]*ux-textspans--BOLD[^"]*"[^>]*>([^<]+)<\/span>/gi,
     /<dt[^>]*>([^<]+)<\/dt>\s*<dd[^>]*>([^<]+)<\/dd>/gi,
@@ -148,7 +215,6 @@ function parseEbayListing(html) {
     for (const match of matches) {
       const key = match[1].replace(/:$/, '').trim();
       const value = match[2].trim();
-      // Filter out non-specifics
       if (key && value && 
           key.length < 25 && 
           value.length < 100 &&
@@ -171,70 +237,83 @@ function parseEbayListing(html) {
     }
   }
 
-  // Extract seller description
-  // eBay often loads this via iframe, but ScrapingBee should render it
-  if (!description || description.length < 20) {
+  // Try to extract description from main page (sometimes it's inline, not in iframe)
+  if (!description || description.length < 50) {
+    // Look for description in various places
     const descPatterns = [
-      /Item description from the seller[\s\S]*?<div[^>]*class="[^"]*"[^>]*>([\s\S]{20,}?)<\/div>[\s\S]*?(?:Shipping|About this item|Report)/i,
-      /<div[^>]*id="viTabs_0_is"[^>]*>([\s\S]*?)<\/div>/i,
-      /<div[^>]*class="[^"]*item-description[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+      // New eBay layout - look for the actual content div after the header
+      /Item description from the seller<\/[^>]+>[\s\S]*?<div[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/section/i,
+      // Data attribute based
       /<div[^>]*data-testid="d-item-description"[^>]*>([\s\S]*?)<\/div>/i,
-      /descriptionModule[\s\S]*?<div[^>]*>([\s\S]{50,}?)<\/div>/i,
+      // ID based
+      /<div[^>]*id="viTabs_0_is"[^>]*>([\s\S]*?)<\/div>/i,
+      // Class based
+      /<div[^>]*class="[^"]*item-description[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+      // Section with description
+      /<section[^>]*class="[^"]*description[^"]*"[^>]*>([\s\S]*?)<\/section>/i,
     ];
     
     for (const pattern of descPatterns) {
       const match = html.match(pattern);
       if (match && match[1]) {
-        const cleaned = match[1]
-          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/&nbsp;/g, ' ')
-          .replace(/&amp;/g, '&')
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'")
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/\s+/g, ' ')
-          .trim();
-        
-        if (cleaned.length > 20 && cleaned.length > (description?.length || 0)) {
+        const cleaned = cleanHtml(match[1]);
+        if (cleaned.length > 50 && cleaned.length > (description?.length || 0)) {
           description = cleaned;
+          break;
         }
       }
     }
   }
 
-  // Build a text summary for Claude
-  let summary = '';
-  if (title) summary += `Title: ${title}\n`;
-  if (price) summary += `Price: $${price}\n`;
-  if (condition) summary += `Condition: ${condition}\n`;
+  const listing = { title, price, condition, specifics, description: (description || '').slice(0, 3000) };
+  listing.summary = buildSummary(listing);
   
-  if (Object.keys(specifics).length > 0) {
+  return listing;
+}
+
+function cleanHtml(html) {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function buildSummary(listing) {
+  let summary = '';
+  if (listing.title) summary += `Title: ${listing.title}\n`;
+  if (listing.price) summary += `Price: $${listing.price}\n`;
+  if (listing.condition) summary += `Condition: ${listing.condition}\n`;
+  
+  if (Object.keys(listing.specifics).length > 0) {
     summary += '\nItem Specifics:\n';
-    for (const [key, value] of Object.entries(specifics)) {
+    for (const [key, value] of Object.entries(listing.specifics)) {
       summary += `${key}: ${value}\n`;
     }
   }
   
-  if (description && description.length > 20) {
-    summary += `\nSeller Description:\n${description.slice(0, 3000)}`;
-    if (description.length > 3000) summary += '...';
+  if (listing.description && listing.description.length > 20) {
+    summary += `\nSeller Description:\n${listing.description.slice(0, 3000)}`;
+    if (listing.description.length > 3000) summary += '...';
   } else {
-    summary += '\n(Seller description not found - it may be in an iframe. You can paste it manually below.)';
+    summary += '\n(Seller description not found - it may be in an iframe. Please paste it manually below.)';
   }
 
-  if (!title && !price) {
+  if (!listing.title && !listing.price) {
     summary = 'Could not parse listing details. Please paste the listing content manually.';
   }
 
-  return {
-    title,
-    price,
-    condition,
-    specifics,
-    description: (description || '').slice(0, 3000),
-    summary
-  };
+  return summary;
 }
